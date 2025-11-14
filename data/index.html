@@ -33,60 +33,40 @@ async function update() {
     // update chart
     temps.push(Number(j.temp));
     if (temps.length > MAXPTS) temps.shift();
-    drawChart();
+    //drawChart();
   } catch(e) {
     console.log('Update error', e);
   }
 }
 
-function drawChart() {
-  const c = document.getElementById('chart');
-  const ctx = c.getContext('2d');
-  const w = c.width = c.clientWidth;
-  const h = c.height = c.clientHeight;
-  ctx.clearRect(0,0,w,h);
 
-  // background grid
-  ctx.fillStyle = '#0f0f0f'; ctx.fillRect(0,0,w,h);
-  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
-  for (let i=0;i<4;i++){
-    let y = h*(i+1)/5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
-  }
-
-  if (temps.length === 0) return;
-  const min = Math.min(...temps);
-  const max = Math.max(...temps);
-  const range = (max - min) || 1;
-
-  ctx.strokeStyle = '#4fc3f7';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  temps.forEach((t, i) => {
-    const x = (i/(MAXPTS-1)) * w;
-    const y = h - ((t - min) / range) * h;
-    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  });
-  ctx.stroke();
-
-  // draw last value
-  const last = temps[temps.length-1];
-  const lx = ((temps.length-1)/(MAXPTS-1)) * w;
-  const ly = h - ((last - min) / range) * h;
-  ctx.fillStyle = '#4fc3f7';
-  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI*2); ctx.fill();
-
-  // labels
-  ctx.fillStyle = '#aaa'; ctx.font = '11px system-ui';
-  ctx.fillText(max.toFixed(1)+'°', 6, 12);
-  ctx.fillText(min.toFixed(1)+'°', 6, h-6);
-}
 async function drawTempHistory() {
   const res = await fetch("/temp_history.json");
   const history = await res.json();
 
-  const ctx = document.getElementById("tempHourGraph").getContext("2d");
+  const canvas = document.getElementById("tempHourGraph");
+  const ctx = canvas.getContext("2d");
 
-  ctx.clearRect(0, 0, 400, 150);
+  // адаптивная ширина
+  canvas.width = canvas.clientWidth;
+  canvas.height = 160;
+
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // фон
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0,0,w,h);
+
+  // сетка
+  ctx.strokeStyle = "#222";
+  for (let i=1; i<5; i++) {
+    let y = (h/5) * i;
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(w,y);
+    ctx.stroke();
+  }
 
   if (history.length === 0) return;
 
@@ -94,23 +74,30 @@ async function drawTempHistory() {
   const maxT = Math.max(...history.map(p => p.v));
   const range = maxT - minT || 1;
 
-  ctx.beginPath();
   ctx.strokeStyle = "#ff6600";
   ctx.lineWidth = 2;
 
+  ctx.beginPath();
+
   history.forEach((p, i) => {
-    const x = (i / history.length) * 400;
-    const y = 150 - ((p.v - minT) / range) * 150;
+    const x = (i / (history.length - 1)) * w;
+    const y = h - ((p.v - minT) / range) * h;
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
 
   ctx.stroke();
+
+  // min/max надписи
+  ctx.fillStyle = "#aaa";
+  ctx.font = "12px sans-serif";
+  ctx.fillText(maxT.toFixed(1) + "°C", 8, 14);
+  ctx.fillText(minT.toFixed(1) + "°C", 8, h - 6);
 }
 
+window.addEventListener('resize', drawTempHistory);
 setInterval(drawTempHistory, 15000);
 drawTempHistory();
-
 
 function goLogs(){ location.href='/logs'; }
 async function restartDevice(){
@@ -164,13 +151,12 @@ setInterval(updateMqtt, 2000);
   <div class="card"><div class="card-title">IP Address</div><div class="card-value" id="ip">--</div></div>
   <div class="card"><div class="card-title">Wi-Fi RSSI</div><div class="card-value" id="rssi">--</div></div>
   <div class="card"><div class="card-title">Uptime</div><div class="card-value" id="uptime">--</div></div>
-  <div class="card"><div class="card-title">Temperature</div><div class="card-value" id="temp">--</div>
-    <canvas id="chart"></canvas>
-  </div>
   <div class="card">
-    <div class="card-title">Temperature — last hour</div>
+    <div class="card-title">Temperature — last hour</div><div class="card-value" id="temp">--</div>
     <canvas id="tempHourGraph" width="400" height="150"></canvas>
-  </div>  
+  </div> 
+</div>
+<div class="grid"></div> 
   <div class="card"><div class="card-title">MQTT Last Message</div><div class="card-value" id="mqtt_msg">--</div></div>
   <div class="card"><div class="card-title">MQTT Control</div>
     <button onclick="sendMqtt('cmd/esp32/relay','1')">Relay ON</button>
