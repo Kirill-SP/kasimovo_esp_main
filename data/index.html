@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ESP32 Dashboard</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { margin:0; padding:20px; font-family:system-ui, sans-serif; background:#0d0d0d; color:#eee; }
+h1 { text-align:center; color:#4fc3f7; font-weight:600; margin:0 0 10px 0; }
+.grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:16px; margin-top:16px; }
+.card { background:#1d1d1d; padding:16px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.35); text-align:center; }
+.card-title { font-size:13px; opacity:0.8; margin-bottom:6px; }
+.card-value { font-size:22px; font-weight:700; }
+#chart { width:100%; height:120px; display:block; background:#111; border-radius:8px; margin-top:6px; }
+.btns { margin-top:18px; display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+button, a.btn { background:#1d1d1d; border:none; padding:10px 14px; border-radius:10px; color:#4fc3f7; cursor:pointer; text-decoration:none; }
+button:hover, a.btn:hover { background:#262626; }
+small.note { display:block; text-align:center; margin-top:8px; color:#aaa; }
+</style>
+<script>
+let temps = []; const MAXPTS = 30;
+
+async function update() {
+  try {
+    const r = await fetch('/status');
+    const j = await r.json();
+    document.getElementById("ip").textContent = j.ip;
+    document.getElementById("rssi").textContent = j.rssi + " dBm";
+    document.getElementById("uptime").textContent = j.uptime;
+    document.getElementById("temp").textContent = j.temp.toFixed(1) + " °C";
+
+    // update chart
+    temps.push(Number(j.temp));
+    if (temps.length > MAXPTS) temps.shift();
+    drawChart();
+  } catch(e) {
+    console.log('Update error', e);
+  }
+}
+
+function drawChart() {
+  const c = document.getElementById('chart');
+  const ctx = c.getContext('2d');
+  const w = c.width = c.clientWidth;
+  const h = c.height = c.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  // background grid
+  ctx.fillStyle = '#0f0f0f'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+  for (let i=0;i<4;i++){
+    let y = h*(i+1)/5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+  }
+
+  if (temps.length === 0) return;
+  const min = Math.min(...temps);
+  const max = Math.max(...temps);
+  const range = (max - min) || 1;
+
+  ctx.strokeStyle = '#4fc3f7';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  temps.forEach((t, i) => {
+    const x = (i/(MAXPTS-1)) * w;
+    const y = h - ((t - min) / range) * h;
+    if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // draw last value
+  const last = temps[temps.length-1];
+  const lx = ((temps.length-1)/(MAXPTS-1)) * w;
+  const ly = h - ((last - min) / range) * h;
+  ctx.fillStyle = '#4fc3f7';
+  ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI*2); ctx.fill();
+
+  // labels
+  ctx.fillStyle = '#aaa'; ctx.font = '11px system-ui';
+  ctx.fillText(max.toFixed(1)+'°', 6, 12);
+  ctx.fillText(min.toFixed(1)+'°', 6, h-6);
+}
+async function drawTempHistory() {
+  const res = await fetch("/temp_history.json");
+  const history = await res.json();
+
+  const ctx = document.getElementById("tempHourGraph").getContext("2d");
+
+  ctx.clearRect(0, 0, 400, 150);
+
+  if (history.length === 0) return;
+
+  const minT = Math.min(...history.map(p => p.v));
+  const maxT = Math.max(...history.map(p => p.v));
+  const range = maxT - minT || 1;
+
+  ctx.beginPath();
+  ctx.strokeStyle = "#ff6600";
+  ctx.lineWidth = 2;
+
+  history.forEach((p, i) => {
+    const x = (i / history.length) * 400;
+    const y = 150 - ((p.v - minT) / range) * 150;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+
+  ctx.stroke();
+}
+
+setInterval(drawTempHistory, 15000);
+drawTempHistory();
+
+
+function goLogs(){ location.href='/logs'; }
+async function restartDevice(){
+  // navigation will prompt for auth if needed
+  await fetch('/restart');
+  alert('Restart requested');
+}
+async function clearLogs(){
+  await fetch('/clearlogs');
+  alert('Logs cleared');
+}
+
+setInterval(update, 5000);
+window.addEventListener('load', () => {
+  update();
+  // make sure chart has correct initial size
+  drawChart();
+  window.addEventListener('resize', drawChart);
+});
+async function updateMqtt() {
+  try {
+    const r = await fetch('/mqtt_status');
+    const j = await r.json();
+    if (j.status !== "no data") {
+      document.getElementById("mqtt_msg").textContent =
+        j.topic + " = " + j.payload;
+    }
+  } catch(e) {}
+}
+
+async function sendMqtt(topic, payload) {
+  const form = new URLSearchParams();
+  form.append("topic", topic);
+  form.append("payload", payload);
+
+  await fetch("/mqtt_cmd", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: form.toString()
+  });
+
+  alert("Published: " + topic + " = " + payload);
+}
+
+setInterval(updateMqtt, 2000);
+</script>
+</head>
+<body>
+<h1>ESP32 Dashboard</h1>
+<div class="grid">
+  <div class="card"><div class="card-title">IP Address</div><div class="card-value" id="ip">--</div></div>
+  <div class="card"><div class="card-title">Wi-Fi RSSI</div><div class="card-value" id="rssi">--</div></div>
+  <div class="card"><div class="card-title">Uptime</div><div class="card-value" id="uptime">--</div></div>
+  <div class="card"><div class="card-title">Temperature</div><div class="card-value" id="temp">--</div>
+    <canvas id="chart"></canvas>
+  </div>
+  <div class="card">
+    <div class="card-title">Temperature — last hour</div>
+    <canvas id="tempHourGraph" width="400" height="150"></canvas>
+  </div>  
+  <div class="card"><div class="card-title">MQTT Last Message</div><div class="card-value" id="mqtt_msg">--</div></div>
+  <div class="card"><div class="card-title">MQTT Control</div>
+    <button onclick="sendMqtt('cmd/esp32/relay','1')">Relay ON</button>
+    <button onclick="sendMqtt('cmd/esp32/relay','0')">Relay OFF</button>
+  </div>  
+</div>
+
+<div class="btns">
+  <a class="btn" href="/update">OTA Update</a>
+  <a class="btn" href="javascript:goLogs()">Logs</a>
+  <button onclick="restartDevice()">Restart</button>
+  <button onclick="clearLogs()">Clear logs</button>
+</div>
+<small class="note">Protected actions will ask for credentials if configured.</small>
+</body>
+</html>
